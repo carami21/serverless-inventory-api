@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless Inventory API — Cloud-native REST API on AWS Lambda + API Gateway + DynamoDB.
+  Built for Amazon SDE internship application portfolio.
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: python3.12
+    Environment:
+      Variables:
+        DYNAMODB_TABLE: !Ref ProductsTable
+        AWS_REGION_NAME: !Ref AWS::Region
+
+Resources:
+
+  # -------------------------------------------------------------------------
+  # Lambda Function
+  # -------------------------------------------------------------------------
+  InventoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src.main.handler
+      Description: FastAPI + Mangum handler for the Serverless Inventory API
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+  # -------------------------------------------------------------------------
+  # DynamoDB Table — PAY_PER_REQUEST (free tier friendly, no capacity planning)
+  # -------------------------------------------------------------------------
+  ProductsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Products
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+        - AttributeName: category
+          AttributeType: S
+        - AttributeName: price
+          AttributeType: N
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: CategoryPriceIndex
+          KeySchema:
+            - AttributeName: category
+              KeyType: HASH
+            - AttributeName: price
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # -------------------------------------------------------------------------
+  # CloudWatch Alarms — proactive monitoring
+  # -------------------------------------------------------------------------
+  HighLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: InventoryAPI-HighLatency
+      AlarmDescription: >
+        p99 integration latency exceeded 500ms over two consecutive 5-minute windows.
+        Investigate Lambda cold starts or DynamoDB throttling.
+      Namespace: AWS/ApiGateway
+      MetricName: IntegrationLatency
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref ServerlessHttpApi
+      ExtendedStatistic: p99
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 500
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  ErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: InventoryAPI-ErrorRate
+      AlarmDescription: >
+        5xx error count exceeded 5 in a 5-minute window.
+        Check Lambda logs and DynamoDB health.
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref ServerlessHttpApi
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL (live after sam deploy)
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt InventoryFunction.Arn
+
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref ProductsTable
