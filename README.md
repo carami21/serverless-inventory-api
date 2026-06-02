@@ -1,0 +1,1 @@
+# serverless-inventory-api
