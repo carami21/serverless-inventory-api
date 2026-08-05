@@ -3,6 +3,10 @@
 .env.*
 *.env
 
+# Vault/internal notes — never belong in a public portfolio repo
+handoff.md
+instructions.md
+
 # Python
 __pycache__/
 *.pyc
